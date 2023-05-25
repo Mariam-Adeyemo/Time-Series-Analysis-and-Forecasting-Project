@@ -1,0 +1,450 @@
+---
+title: "Time Series Final Project"
+author: "Mariam Adeyemo"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+### Energy Generation Time Series Analysis for all Sectors in Illinois State from January 2001 - March 2022
+
+
+#### Load the dataset
+
+``` {r}
+Datapath <- getwd()
+
+#load the dataset
+energy_df <- read.csv(file.path(Datapath, "electricity_data.csv"))
+
+#view the dataset
+#head(energy_df, 5)
+```
+
+
+#### Extract the Illinois dataset
+
+``` {r}
+library(dplyr)
+
+#get the Illinois dataset
+illinois_df <- select(energy_df, X, Illinois...all.sectors)
+
+head(illinois_df, 5)
+```
+
+
+### EDA
+
+```{r}
+#check the data type
+str(illinois_df)
+```
+
+``` {r}
+#check for missing values
+colSums(is.na(illinois_df))
+```
+
+
+There are no missing data 
+
+
+
+``` {r}
+#convert the date column into a date type
+illinois_df$X <- as.Date(illinois_df$X)
+
+# Change the name of a date column
+colnames(illinois_df)[1] <- "Date"
+
+sapply(illinois_df, class)
+```
+
+
+``` {r}
+library(ggplot2)
+
+# Plot the density and histogram
+ggplot(illinois_df, aes(x = Illinois...all.sectors)) +
+  geom_density(fill = "blue", alpha = 0.5) +  # Density plot
+  geom_histogram(aes(y = ..density..), fill = "black", alpha = 0.5, binwidth = 500) +  # Histogram
+  geom_vline(aes(xintercept = mean(Illinois...all.sectors)), color = "red", linetype = "dashed") +  # Mean line
+  labs(x = "Energy in thousand megawatts hours", y = "Density", title = "Distribution of Energy Generation in Illinois for all Sectors") +
+  theme_minimal()
+
+```
+
+``` {r}
+library(moments)
+
+# Calculate summary statistics
+mean_value <- mean(illinois_df$Illinois...all.sectors)
+median_value <- median(illinois_df$Illinois...all.sectors)
+std_dev <- sd(illinois_df$Illinois...all.sectors)
+skewness <- moments::skewness(illinois_df$Illinois...all.sectors)
+kurtosis <- moments::kurtosis(illinois_df$Illinois...all.sectors)
+
+# Print the summary statistics
+cat("Summary Statistics of the Energy Generation in Illinois for all Sectors:")
+cat("\nMean:", mean_value)
+cat("\nMedian:", median_value)
+cat("\nStandard Deviation:", std_dev)
+cat("\nSkewness:", skewness)
+cat("\nKurtosis:", kurtosis)
+
+```
+
+Based on the result of the statistics, the average energy generation of all the sectors in Illinois is about 15972 (thousand MWh) per month. Also, the standard deviation of 1425.369 suggests a moderate level of variability in the dataset, indicating that the individual values tend to deviate from the mean by around 1425.369 (thousand MWh) units on average. 
+
+Furthermore, it has a Skewness of 0.1849338 implies that the skewness of the data is positive which indicates that the distribution is skewed to the right, meaning that there are more extreme values on the right side of the distribution. However, the value is closer to zero and this suggests a relatively smaller deviation from a symmetric distribution.
+
+In addition, it has a kurtosis value of 2.354478 which suggests a moderately peaked distribution with heavier tails compared to a normal distribution. This indicates that the dataset has a higher concentration of values in the center and a higher frequency of extreme values in the tails. 
+
+In conclusion, though the energy generation values in Illinois for all sectors may not perfectly match a normal distribution, it does not exhibit extreme departures from normality.
+
+
+
+``` {r}
+
+# Plot a boxplot of the 'data' column
+boxplot(illinois_df$Illinois...all.sectors, main = "Boxplot of Energy Generation in Illinois for all Sectors", ylab = "Energy in thousand megawatts hours")
+```
+
+The box plot indicates that the 25th percentile (Q1) value is around 15000 (thousand MWh), and the 75th percentile (Q3) value is around 17000 (thousand MWh). It also shows suggests that the distribution is slightly skewed and that there is not a lot of variability in the data points. Furthermore, there are no outliers in the dataset. 
+
+
+
+#### Convert the data into a TS object
+
+``` {r}
+library(forecast)
+library(lubridate)
+
+#Convert the illinois data to a ts object
+
+illinois_ts <- ts(illinois_df$Illinois...all.sectors, start =c(year(illinois_df$Date[1]), month(illinois_df$Date[1])), frequency = 12)
+
+```
+
+I checked for gaps in the data and there was none.
+
+
+
+### Qualitative Analysis to Check for Stationarity
+
+
+``` {r}
+# plot the xts object using plot.xts()
+plot.ts(illinois_ts, main = "Energy Generation in Illinois for all Sectors", 
+         ylab = "Energy in thousand megawatts hours", xlab = "Year", cex.lab = 0.1)
+```
+
+
+The plot above shows that the time series looks non-stationary. I am not seeing any obvious trends but I suspect some seasonality.
+
+
+``` {r}
+
+# plot the ACF using acf()
+acf(illinois_df$Illinois...all.sectors, main = "ACF of Energy Generation in Illinois for all Sectors", cex.main = 0.05, lag=40)
+
+```
+
+The ACF plot shows a rapid decay of the autocorrelations towards zero which indicates potential stationarity. However, there seem to be a multiple seasonal pattern in the data as the autocorrelation spikes in some of the lags. I noticed peaks at lag 12, 24, 36, as well as peaks at lag 3, 9, 15, and lag 6, 12, 18. This suggests the presence of yearly, quarterly, and semi-annual seasonality.
+
+
+Since it's a monthly data, I will use Seasonal Extraction in ARIMA Time Series (SEAT) decomposition to view the different component of the data for better clarity.
+
+
+``` {r}
+library(seasonal)
+
+illinois_ts %>% seas() %>%
+autoplot() +
+  ggtitle("SEATS decomposition of Illinois Energy Generation")
+```
+
+
+The plot above shows that the Illinois dataset has a an obvious trend and seasonality pattern. The seasonal component changes slowly over time and I notice the slight decrease in the trend from 2015. This suggest that the Illinois time series data is non-stationary. This indicates that the time series is non-stationary
+
+
+
+### Quantitative Analysis to check for Stationarity
+
+#### ADF Test
+
+``` {r}
+library(tseries)
+
+suppressWarnings(adf.test(illinois_ts))
+
+```
+
+Based on the ADF test (in which the null hypothesis is that the time series is non-stationary) the p-value of the time series is 0.02 which is less than 0.05 level of significance. This means that we reject the null hypothesis and conclude that the time series is stationary.
+
+
+#### KPSS Test
+
+``` {r}
+
+suppressWarnings(kpss.test(illinois_ts))
+
+```
+
+Based on the KPSS test (in which the null hypothesis is that the time series is stationary) the p-value of the time series is 0.01 which is less than 0.05 level of significance. This means that we will reject the null hypothesis and conclude that the time series is non-stationary.
+
+
+Looking at the result of both ADF and KPSS test, the ADF test shows stationary which means that the time series basically has no unit root (indicating a trend stationary). However, the KPSS result indicate non-stationary which agrees with the qualitative analysis results. Therefore, I conclude that the Illinois time series data is non-stationary.
+
+
+
+#### Since the Illinois time series data has mulitiple seasonality, I will try out 2 different models that I believe can handle this seasonal complexity. This woould be ARIMA with Fourier terms (used to capture seasonal patterns) and Trigonometric Box-Cox ARMA Time Series (TBATS).
+
+
+
+#### Split data into train and test set
+
+``` {r}
+
+#split my data into train and test
+train_set <- subset(illinois_df, Date <= "2019-12-01")
+test_set <- subset(illinois_df, Date > "2019-12-01")
+
+# Print the number of observations in each set
+cat("Number of observations in the training set:", nrow(train_set), "\n")
+cat("Number of observations in the test set:", nrow(test_set), "\n")
+
+```
+
+
+``` {r}
+#convert the train and test set to a TS object
+train_ts <- ts(train_set$Illinois...all.sectors, start =c(year(train_set$Date[1]), month(train_set$Date[1])), frequency = 12)
+
+test_ts <- ts(test_set$Illinois...all.sectors, start =c(year(test_set$Date[1]), month(train_set$Date[1])), frequency = 12)
+
+```
+
+
+
+
+### ARIMA with Fourier Terms
+
+To determine the appropriate value of K for the Fourier terms, the highest seasonality component needs to be considered, which is the yearly seasonality (lag 12). Since the highest seasonality component is at lag 12, K can be set to half of that value or a lower value if desired. This value captures the yearly, quarterly, and semi-annual seasonality patterns in the data.
+
+
+``` {r}
+library(forecast)
+
+#Specify K
+K <- 6
+
+# Create the Fourier terms
+fourier_terms <- fourier(train_ts, K = K)
+
+# Fit the ARIMA model with Fourier terms
+model_1 <- auto.arima(train_ts, xreg = fourier_terms, seasonal = FALSE)
+
+# print the model summary
+summary(model_1)
+
+#check the residuals
+checkresiduals(model_1)
+```
+
+
+``` {r}
+#check statistics for normality test for the RIMA model with Fourier terms residuals
+norm_model_1 <- shapiro.test(model_1$residuals)$p.value
+
+norm_model_1
+```
+
+
+I tried different values for the p and q but none had a smaller AIC values compared to the model from auto.arima. So, I will use the model from auto.arima with fourier terms for forecasting.
+
+
+Based on the summary of the residual analysis plot, the ACF plot of ARIMA (1,1,1) errors with fourier terms shows that most of the spikes are within the significance limits, so the residuals appear to be white noise. The Ljung-Box test also shows a p-value of 0.1503, which is greater than 0.05 significant level. Therefore, we do not have sufficient evidence to reject the null hypothesis (that there is no autocorrelation). This suggests that there is no significant autocorrelation in the residuals of the model.
+
+In addition, the shapiro normality test showed a p-value of 0.4820205, which is greater than the common significance level of 0.05, there is insufficient evidence to conclude that the residuals of model_1 depart significantly from a normal distribution. Therefore, we can assume that the residuals are reasonably normally distributed.
+
+### Forecasting using ARIMA with Fourier Terms Model 
+
+``` {r}
+
+# Define the forecast horizon
+h <- 27  # Number of periods to forecast
+
+# Calculate the Fourier terms for the forecast horizon
+fourier_terms_forecast <- fourier(train_ts, K = K, h = h)
+
+# Generate the forecast
+illinois_forecast <- forecast(model_1, xreg = fourier_terms_forecast)
+
+
+# Plot the forecasted values
+plot(illinois_forecast,
+     xlab = "Year",
+     ylab = "Energy in thousand megawatts hours",
+     main= "ARIMA with Fourier Terms Forecast: Energy Generation in Illinois for all Sectors ",
+     cex.main = 1.0)
+```
+
+
+
+``` {r}
+
+# Specify the y-axis limits to provide a better view
+y_min <- min(min(test_ts), min(illinois_forecast$mean)) - 10
+y_max <- max(max(test_ts), max(illinois_forecast$mean)) + 10
+
+# Plot the actual values
+plot(train_ts, type = "l", xlab = "Year", ylab = "Energy in thousand megawatts hours", main = "Actuals vs. Forecasts", ylim = c(y_min, y_max))
+lines(test_ts, col = "blue")  # Actual values
+
+# Add the forecasted values to the plot
+lines(illinois_forecast$mean, col = "red")  # Forecasted values
+
+# Add a legend
+legend("topleft", legend = c("Actual", "Forecast"), col = c("blue", "red"), lty = 1)
+
+```
+
+
+``` {r}
+
+# Create a new plot with the actual and forecasts
+
+plot(test_ts, main="ARIMA with Fourier Terms Model (Actual vs. Forecasts)", xlab="Year", ylab="Energy in thousand megawatts hours", lwd=2, col="green")
+lines(illinois_forecast$mean, col="blue", lwd=2)
+
+# Add a legend
+legend("topleft", legend=c("Actual", "Forecasts"), col=c("green", "blue"), lty=1, cex=0.8)
+
+```
+
+``` {r}
+# Calculate the MSE for the ARIMA with Fourier terms model
+MSE_arima_fourier <- mean((test_set$Illinois...all.sectors - illinois_forecast$mean)^2)
+
+
+#print the summary
+print(MSE_arima_fourier)
+
+```
+
+An MSE of 673,589 suggests that, on average, the squared difference between the forecasted values and the actual values is approximately 673,589 thousand megawatt-hours squared.
+
+``` {r}
+#write a function to calculate the sMAPE
+calculate_smape <- function(actual, predicted) {
+  absolute_difference <- abs(actual - predicted)
+  absolute_sum <- abs(actual) + abs(predicted)
+  smape <- (2 * absolute_difference / absolute_sum) * 100
+  mean_smape <- mean(smape, na.rm = TRUE)
+  return(mean_smape)
+}
+
+
+#get the mean SMAPE score for model 1
+smape_score_model1 <- calculate_smape(test_set$Illinois...all.sectors, illinois_forecast$mean)
+print(paste("Model1 SMAPE:", smape_score_model1))
+```
+
+Based on the mean SMAPE analysis of the ARIMA with fourier terms model,it has the mean SMAPE of 4.6. This indicate that it has an average percentage error of 4.6 between the predicted values and the actual values.
+
+
+``` {r}
+illinois_forecast
+```
+
+
+### Trigonometric Box-Cox ARMA Time Series (TBATS)
+
+
+``` {r}
+library(forecast)
+
+#fit the TBATS model to the train set
+tbats_model <- tbats(train_ts)
+
+#print the summary of the tbats model
+summary(tbats_model)
+
+
+#extract the TBATS components of the model
+comp <- tbats.components(tbats_model)
+
+#plot the TBATS component
+plot(comp)
+
+```
+
+
+``` {r}
+#get the AIC value of the tbats model
+tbats_model$AIC
+```
+
+
+TBATS Residual Analysis
+
+``` {r}
+#check for residuals
+checkresiduals(tbats_model)
+
+#check statistics for normality test for the RIMA model with Fourier terms residuals
+norm_tbats <- shapiro.test(tbats_model$errors)$p.value
+
+norm_tbats
+```
+
+
+Based on the summary of the residual analysis plot, the ACF plot of the TBATS errors shows that there is a significant spike at lag 6 and around lag 18, it suggests that there is a significant correlation between the residuals at that lag. The Ljung-Box test also shows a p-value of 0.00, which is less than 0.05 significant level. Therefore, we will reject the null hypothesis (that there is no autocorrelation). This suggests that there is autocorrelation in the residuals of the tbats model.
+
+However, the shapiro normality test showed a p-value of 0.4596458, which is greater than the common significance level of 0.05, there is insufficient evidence to conclude that the residuals of model_1 depart significantly from a normal distribution. Therefore, we can assume that the residuals are reasonably normally distributed.
+
+
+### Forecasting using TBATS
+
+``` {r}
+
+#forecast using the tbats model
+forecast_tbats <- forecast(tbats_model, h = length(test_ts))
+
+
+# Create a new plot with the actual and forecasts
+
+plot(test_ts, main="TBATS Model (Actual vs. Forecasts)", xlab="Year", ylab="Energy in thousand megawatts hours", lwd=2, col="yellow")
+lines(forecast_tbats$mean, col="red", lwd=2)
+
+# Add a legend
+legend("topleft", legend=c("Actual", "Forecasts"), col=c("yellow", "red"), lty=1, cex=0.8)
+
+```
+
+
+``` {r}
+# Calculate the MSE for the tbats model
+MSE_tbats <- mean((test_set$Illinois...all.sectors - forecast_tbats$mean)^2)
+
+
+#print the summary
+print(MSE_tbats)
+```
+
+An MSE of 601,893 suggests that, on average, the squared difference between the forecasted values and the actual values is approximately 601,893 thousand megawatt-hours squared.
+
+
+
+``` {r}
+#get the mean SMAPE score for model 1
+smape_score_tbats <- calculate_smape(test_set$Illinois...all.sectors, forecast_tbats$mean)
+
+print(paste("Tbats SMAPE:", smape_score_tbats))
+```
+
+Based on the mean SMAPE analysis of the ARIMA with fourier terms model,it has the mean SMAPE of 4.3. This indicate that it has an average percentage error of 4.3 between the predicted values and the actual values.
+
+
+
